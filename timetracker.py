@@ -103,7 +103,8 @@ parser.add_option("-s", "--stop",
 name_map = {}
 timers = []
 save_changes = False
-now = datetime.datetime.now() # Assume we'll need it, so get it once.
+now = datetime.datetime.now().replace(microsecond=0) # Assume we'll need it, so get it once.
+
 
 def main():
 	fname = os.path.expanduser(options.filename)
@@ -213,11 +214,20 @@ def start_timer(name):
 	save_changes = True
 	print "Start", name, now
 
+def timer_name(t):
+	return t[0]
+
+def timer_start(t):
+	return t[1]
+
+def timer_end(t):
+	return t[2]
+
 def timer_duration(t):
 	if timer_active(t):
-		dur = now - t[1]
+		dur = now - timer_start(t)
 	else:
-		dur = t[2] - t[1]
+		dur = timer_end(t) - timer_start(t)
 	return dur
 
 def map_str(map, n):
@@ -226,97 +236,63 @@ def map_str(map, n):
 	else:
 		return ''
 
+def same_day(prev_date, date):
+	 return (prev_date.year == date.year and prev_date.month == date.month
+			 and prev_date.day == date.day)
+
+def same_week(prev_date, date):
+	# weekday() returns 0 for Monday, 6 for Sunday
+	 return (prev_date.year == date.year and prev_date.month == date.month
+			 and (prev_date.day == date.day or date.weekday() != 6))
+
 def same_month(prev_date, date):
-	 return (prev_date and prev_date.year == date.year
-					   and prev_date.month == date.month)
+	 return prev_date.year == date.year and prev_date.month == date.month
 		
-def print_month_header(date):
-	# calendar.setfirstweekday(calendar.SUNDAY)
-	# monthrange doesn't pay attention to firstweekday, the default is MONDAY.
-	(firstday, days) = calendar.monthrange(date.year, date.month)
-	firstday = (firstday + 1) % 7
-	week = "SMTWTFS"
-	daytop = "         1111111111222222222233"
-	daybot = "1234567890123456789012345678901"
-	numweeks = (firstday + days + 6) / 7
-	print ' ' * 7, week * numweeks
-	print '  {:5.5} {:>{}}'.format(date.strftime("%Y"), daytop[0:days], firstday+days)
-	print '  {:5.5} {:>{}}'.format(date.strftime("%B"), daybot[0:days], firstday+days)
-	return firstday
+def add_duration(timer, total):
+	n = timer_name(timer)
+	d = timer_duration(timer)
+	if n in total:
+		total[n] += d
+	else:
+		total[n] = d
+
+def print_daily(date, total):
+	print 'day   {:%Y-%m-%d}'.format(date)
+	for d in total:
+		print " ", total[d], d
+
+def print_weekly(date, total):
+	print 'week  {:%Y-%m-%d}'.format(date)
+	for d in total:
+		print " ", total[d], d
+
+def print_monthly(date, total):
+	print 'month {:%m}'.format(date)
+	for d in total:
+		print " ", total[d], d
 
 def report():
-	# Print a report
-	# Currently prints timers ordered by name and include a total.
-	# First, collect all timers in a dictionary by name
-	by_name = {}
-	name_order = []
-	reverse_name_map = {}
-	for n in name_map:
-		reverse_name_map[name_map[n]] = n
+	prev_date = timer_start(timers[0])
+	daily_total = {}
+	weekly_total = {}
+	monthly_total = {}
 	for t in timers:
-		if t[0] in by_name:
-			by_name[t[0]].append(t)
-		else:
-			by_name[t[0]] = [t];
-			name_order.append(t[0])
-	# Second, print timers by name, and a total duration
-	for n in name_order:
-		if n in reverse_name_map:
-			print '{} ({})'.format(n, reverse_name_map[n])
-		else:
-			print n
-		total = datetime.timedelta(0)
-		for t in by_name[n]:
-			dur = timer_duration(t)
-			if timer_active(t):
-				print "*", t[1], dur
-			else:
-				print " ", t[1], dur
-			total = total + dur
-		print "  total", total
-	hours = [ "12am", " 1am", " 2am", " 3am", " 4am", " 5am",
-			  " 6am", " 7am", " 8am", " 9am", "10am", "11am",
-			  "noon", " 1pm", " 2pm", " 3pm", " 4pm", " 5pm",
-			  " 6pm", " 7pm", " 8pm", " 9pm", "10pm", "11pm"]
-	for n in name_order:
-		print '{} {}'.format(n, map_str(reverse_name_map, n))
-		prev_date = None
-		total = datetime.timedelta(0)
-		min_hour = 24
-		max_hour = 0
-		graph = [[0 for i in range(24)] for j in range(31)]
-		for t in by_name[n]:
-			start = t[1]
-			dur = timer_duration(t)
-			if not same_month(prev_date, start):
-				indent = print_month_header(start)
-				prev_date = start
-			inc = 60 - start.minute
-			minutes = dur.days * 24 * 60 + (dur.seconds + 59) / 60
-			hour = start.hour
-			day = start.day
-			while minutes > inc:
-				graph[day][hour] += inc
-				minutes = minutes - inc
-				inc = 60
-				hour += 1
-				if hour == 24:
-					day += 1
-					hour = 0
-					min_hour = 0
-					max_hour = 23
-			graph[day][hour] += minutes
-			if start.hour < min_hour:
-				min_hour = start.hour
-			if hour > max_hour:
-				max_hour = hour
-		for h in range(min_hour, max_hour+1):
-			sys.stdout.write('  {} {}'.format(hours[h], ' ' * indent))
-			for d in range(31):
-				if graph[d][h] > 0:
-					sys.stdout.write(str((graph[d][h] + 9)/ 10))
-				else:
-					sys.stdout.write(" ")
-			print
+		date = timer_start(t)
+		if not same_day(prev_date, date):
+			print_daily(prev_date, daily_total)
+			daily_total = {}
+		if not same_week(prev_date, date):
+			print_weekly(prev_date, weekly_total)
+			weekly_total = {}
+		if not same_month(prev_date, date):
+			print_monthly(prev_date, monthly_total)
+			monthly_total = {}
+		add_duration(t, monthly_total)
+		add_duration(t, weekly_total)
+		add_duration(t, daily_total)
+		prev_date = date
+	print_daily(prev_date, daily_total)
+	print_weekly(prev_date, weekly_total)
+	print_monthly(prev_date, monthly_total)
 
 main()
