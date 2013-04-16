@@ -72,7 +72,6 @@ import os
 import re
 import calendar
 import datetime
-import pickle
 import optparse
 
 
@@ -100,6 +99,7 @@ parser.add_option("-s", "--stop",
 # One nasty requirement of globals is having to declare them as global in
 # functions, which leads to non-obvious errors when you don't.
 
+version = 1
 name_map = {}
 timers = []
 save_changes = False
@@ -135,32 +135,60 @@ def date_to_str(date):
 		return "None"
 	return '{:%Y-%m-%d %H:%M:%S}'.format(date)
 
+def timer_name(t):
+	return t[0]
+
+def timer_start(t):
+	return t[1]
+
+def timer_end(t):
+	return t[2]
+
+def timer_duration(t):
+	if timer_active(t):
+		dur = now - timer_start(t)
+	else:
+		dur = timer_end(t) - timer_start(t)
+	return dur
+
 def load(fname):
-	global name_map, timers
+	global name_map, timers, save_changes
 	if options.verbose:
 		print "loading", fname
 	with open(fname, "rb") as f:
+		load_version = 0
 		for line in f:
 			field = line.strip().split('\t')
 			if field[0] == 'MAP':
 				name_map[field[1]] = field[2]
 			elif field[0] == 'TIMER':
-				start = date_from_str(field[2])
-				stop = date_from_str(field[3])
-				timers.append((field[1], start, stop))
+				if load_version > 0:
+					start = date_from_str(field[1])
+					stop = date_from_str(field[2])
+					timers.append((field[3], start, stop))
+				else:
+					start = date_from_str(field[2])
+					stop = date_from_str(field[3])
+					timers.append((field[1], start, stop))
+			elif field[0] == 'VERSION':
+				load_version = int(field[1])
 		if options.verbose:
 			print "loaded", len(name_map), "maps,", len(timers), "timers"
+	if load_version != version:
+		save_changes = True
 
 def save(fname):
 	if options.verbose:
 		print "Saving", fname
 	with open(fname, "wb") as f:
+		# VERSION must be first because loading depends on it.
+		f.write('VERSION\t{}\n'.format(version))
 		for n in name_map:
 			f.write('MAP\t{}\t{}\n'.format(n, name_map[n]))
 		for t in timers:
-			start = date_to_str(t[1])
-			stop = date_to_str(t[2])
-			f.write('TIMER\t{}\t{}\t{}\n'.format(t[0], start, stop))
+			start = date_to_str(timer_start(t))
+			stop = date_to_str(timer_end(t))
+			f.write('TIMER\t{}\t{}\t{}\n'.format(start, stop, timer_name(t)))
 		if options.verbose:
 			print "saved", len(name_map), "maps,", len(timers), "timers"
 
@@ -175,8 +203,8 @@ def resolve_name(name):
 			# assume even with thousands it would not be noticable.  Could at
 			# least add a command to archive old timers.
 			for t in reversed(timers):
-				if re.search(name, t[0]):
-					name = t[0]
+				if re.search(name, timer_name(t)):
+					name = timer_name(t)
 					if options.verbose:
 						print "name matches existing timer"
 					break;
@@ -196,14 +224,14 @@ def handle_map(from_name, to_name):
 		print "Map not changed!"
 
 def timer_active(t):
-	return t[2] == None
+	return timer_end(t) == None
 
 def stop_timer():
 	global save_changes, timers
 	# Stop current timer if it was running
 	if len(timers) > 0 and timer_active(timers[-1]):
 		t = timers[-1]
-		timers[-1] = (t[0], t[1], now)
+		timers[-1] = (timer_name(t), timer_start(t), now)
 		save_changes = True
 		print "Stop", timers[-1][0], now - timers[-1][1]
 
@@ -213,28 +241,6 @@ def start_timer(name):
 	timers.append(t)
 	save_changes = True
 	print "Start", name, now
-
-def timer_name(t):
-	return t[0]
-
-def timer_start(t):
-	return t[1]
-
-def timer_end(t):
-	return t[2]
-
-def timer_duration(t):
-	if timer_active(t):
-		dur = now - timer_start(t)
-	else:
-		dur = timer_end(t) - timer_start(t)
-	return dur
-
-def map_str(map, n):
-	if n in map:
-		return '({})'.format(map[n])
-	else:
-		return ''
 
 def same_day(prev_date, date):
 	 return (prev_date.year == date.year and prev_date.month == date.month
@@ -296,3 +302,5 @@ def report():
 	print_monthly(prev_date, monthly_total)
 
 main()
+
+# vim: tabstop=4:shiftwidth=4:noexpandtab
