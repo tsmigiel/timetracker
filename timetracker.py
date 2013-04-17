@@ -91,6 +91,9 @@ parser.add_option("-m", "--map",
 parser.add_option("-s", "--stop",
 				  action="store_true", dest="stop", default=False,
 				  help="stop any current timer")
+parser.add_option("-r", "--report",
+				  action="store_true", dest="report", default=False,
+				  help="generate a report")
 
 (options, args) = parser.parse_args()
 
@@ -120,8 +123,12 @@ def main():
 	elif name:
 		stop_timer()
 		start_timer(name)
-	else:
+	elif options.report:
 		report()
+	elif timer_active(timers[-1]):
+		print timer_name(timers[-1])
+	else:
+		print "No active timer"
 	if save_changes:
 		save(fname)
 
