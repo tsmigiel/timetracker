@@ -126,7 +126,8 @@ def main():
 	elif options.report:
 		report()
 	elif timer_active(timers[-1]):
-		print timer_name(timers[-1])
+		d = int(timer_duration(timers[-1]).total_seconds() / 60)
+		print "{} {:d}:{:02d}".format(timer_name(timers[-1]), d / 60, d % 60)
 	else:
 		print "No active timer"
 	if save_changes:
