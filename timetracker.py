@@ -73,6 +73,7 @@ import re
 import calendar
 import datetime
 import optparse
+import shutil
 
 
 parser = optparse.OptionParser(usage="usage: %prog [options] name...")
@@ -94,6 +95,9 @@ parser.add_option("-s", "--stop",
 parser.add_option("-r", "--report",
 				  action="store_true", dest="report", default=False,
 				  help="generate a report")
+parser.add_option("-l", "--leap",
+				  dest="leap", metavar="N", type="int",
+				  help="Do a quantum leap to N minutes ago and run the command from that time")
 
 (options, args) = parser.parse_args()
 
@@ -106,16 +110,21 @@ version = 1
 name_map = {}
 timers = []
 save_changes = False
-now = datetime.datetime.now().replace(microsecond=0) # Assume we'll need it, so get it once.
+
+# Save it, because at least 1 option will change it.
+now = datetime.datetime.now().replace(microsecond=0)
 
 
 def main():
+	global now
 	fname = os.path.expanduser(options.filename)
 	if os.path.exists(fname):
 		load(fname)
 	name = None
 	if args:
 		name = resolve_name(" ".join(args))
+	if options.leap:
+		now = now - datetime.timedelta(seconds = options.leap*60)
 	if options.stop:
 		stop_timer()
 	elif options.mapname:
@@ -125,7 +134,7 @@ def main():
 		start_timer(name)
 	elif options.report:
 		report()
-	elif timer_active(timers[-1]):
+	elif len(timers) > 0 and timer_active(timers[-1]):
 		d = int(timer_duration(timers[-1]).total_seconds() / 60)
 		print "{} {:d}:{:02d}".format(timer_name(timers[-1]), d / 60, d % 60)
 	else:
@@ -185,9 +194,24 @@ def load(fname):
 	if load_version != version:
 		save_changes = True
 
+def backup(fname):
+	backup_name = fname + ".bak"
+	if os.path.exists(backup_name):
+		# if the new file is smaller than the previous back up, assume
+		# there was an error and don't overwrite the back up.
+		old_stat = os.stat(backup_name)
+		new_stat = os.stat(fname)
+		if old_stat.st_size > new_stat.st_size:
+			print "Abort back up because", backup_name, "is smaller than", fname
+			return
+	if options.verbose:
+		print "Back up", fname, "to", backup_name
+	shutil.copyfile(fname, backup_name)
+
 def save(fname):
 	if options.verbose:
 		print "Saving", fname
+	backup(fname)
 	with open(fname, "wb") as f:
 		# VERSION must be first because loading depends on it.
 		f.write('VERSION\t{}\n'.format(version))
@@ -236,12 +260,30 @@ def timer_active(t):
 
 def stop_timer():
 	global save_changes, timers
-	# Stop current timer if it was running
-	if len(timers) > 0 and timer_active(timers[-1]):
-		t = timers[-1]
-		timers[-1] = (timer_name(t), timer_start(t), now)
-		save_changes = True
-		print "Stop", timers[-1][0], now - timers[-1][1]
+	if len(timers) == 0:
+		return
+	# Stop current timer if it was running, and adjust existing timers
+	# in case "now" was adjusted by a command line options
+	for i in xrange(len(timers)-1, -1, -1):
+		t = timers[i]
+		if now < timer_start(t):
+			timers[i] = (timer_name(t), now, now)
+			print "Adjust", timer_name(t)
+			print "  before", timer_start(t), timer_end(t)
+			print "   after", timer_start(timers[i]), timer_end(timers[i])
+			save_changes = True
+		elif timer_active(t):
+			timers[i] = (timer_name(t), timer_start(t), now)
+			print "Stop", timer_name(timers[i]), timer_duration(timers[i])
+			save_changes = True
+		elif now < timer_end(t):
+			timers[i] = (timer_name(t), timer_start(t), now)
+			print "Adjust", timer_name(t)
+			print "  before", timer_start(t), timer_end(t)
+			print "   after", timer_start(timers[i]), timer_end(timers[i])
+			save_changes = True
+		else:
+			break
 
 def start_timer(name):
 	global save_changes, timers
@@ -286,6 +328,9 @@ def print_monthly(date, total):
 		print " ", total[d], d
 
 def report():
+	if len(timers) == 0:
+		print "No timers to report"
+		return
 	prev_date = timer_start(timers[0])
 	daily_total = {}
 	weekly_total = {}
