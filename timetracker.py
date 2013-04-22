@@ -114,6 +114,22 @@ save_changes = False
 # Save it, because at least 1 option will change it.
 now = datetime.datetime.now().replace(microsecond=0)
 
+class Timer:
+	def __init__(self, name, start, end = None):
+		self.name = name
+		self.start = start
+		self.end = end
+
+	def active(self):
+		return self.end == None
+
+	def duration(self):
+		if self.active():
+			dur = now - self.start
+		else:
+			dur = self.end - self.start
+		return dur
+
 
 def main():
 	global now
@@ -134,9 +150,9 @@ def main():
 		start_timer(name)
 	elif options.report:
 		report()
-	elif len(timers) > 0 and timer_active(timers[-1]):
-		d = int(timer_duration(timers[-1]).total_seconds() / 60)
-		print "{} {:d}:{:02d}".format(timer_name(timers[-1]), d / 60, d % 60)
+	elif len(timers) > 0 and timers[-1].active():
+		d = int(timers[-1].duration().total_seconds() / 60)
+		print "{} {:d}:{:02d}".format(timers[-1].name, d / 60, d % 60)
 	else:
 		print "No active timer"
 	if save_changes:
@@ -152,22 +168,6 @@ def date_to_str(date):
 		return "None"
 	return '{:%Y-%m-%d %H:%M:%S}'.format(date)
 
-def timer_name(t):
-	return t[0]
-
-def timer_start(t):
-	return t[1]
-
-def timer_end(t):
-	return t[2]
-
-def timer_duration(t):
-	if timer_active(t):
-		dur = now - timer_start(t)
-	else:
-		dur = timer_end(t) - timer_start(t)
-	return dur
-
 def load(fname):
 	global name_map, timers, save_changes
 	if options.verbose:
@@ -182,11 +182,11 @@ def load(fname):
 				if load_version > 0:
 					start = date_from_str(field[1])
 					stop = date_from_str(field[2])
-					timers.append((field[3], start, stop))
+					timers.append(Timer(field[3], start, stop))
 				else:
 					start = date_from_str(field[2])
 					stop = date_from_str(field[3])
-					timers.append((field[1], start, stop))
+					timers.append(Timer(field[1], start, stop))
 			elif field[0] == 'VERSION':
 				load_version = int(field[1])
 		if options.verbose:
@@ -218,9 +218,9 @@ def save(fname):
 		for n in name_map:
 			f.write('MAP\t{}\t{}\n'.format(n, name_map[n]))
 		for t in timers:
-			start = date_to_str(timer_start(t))
-			stop = date_to_str(timer_end(t))
-			f.write('TIMER\t{}\t{}\t{}\n'.format(start, stop, timer_name(t)))
+			start = date_to_str(t.start)
+			stop = date_to_str(t.end)
+			f.write('TIMER\t{}\t{}\t{}\n'.format(start, stop, t.name))
 		if options.verbose:
 			print "saved", len(name_map), "maps,", len(timers), "timers"
 
@@ -235,8 +235,8 @@ def resolve_name(name):
 			# assume even with thousands it would not be noticable.  Could at
 			# least add a command to archive old timers.
 			for t in reversed(timers):
-				if re.search(name, timer_name(t)):
-					name = timer_name(t)
+				if re.search(name, t.name):
+					name = t.name
 					if options.verbose:
 						print "name matches existing timer"
 					break;
@@ -255,9 +255,6 @@ def handle_map(from_name, to_name):
 	else:
 		print "Map not changed!"
 
-def timer_active(t):
-	return timer_end(t) == None
-
 def stop_timer():
 	global save_changes, timers
 	if len(timers) == 0:
@@ -266,47 +263,46 @@ def stop_timer():
 	# in case "now" was adjusted by a command line options
 	for i in xrange(len(timers)-1, -1, -1):
 		t = timers[i]
-		if now < timer_start(t):
-			timers[i] = (timer_name(t), now, now)
-			print "Adjust", timer_name(t)
-			print "  before", timer_start(t), timer_end(t)
-			print "   after", timer_start(timers[i]), timer_end(timers[i])
+		if now < t.start:
+			timers[i] = Timer(t.name, now, now)
+			print "Adjust", t.name
+			print "  before", t.start, t.end
+			print "   after", timers[i].start, timers[i].end
 			save_changes = True
-		elif timer_active(t):
-			timers[i] = (timer_name(t), timer_start(t), now)
-			print "Stop", timer_name(timers[i]), timer_duration(timers[i])
+		elif t.active():
+			timers[i] = Timer(t.name, t.start, now)
+			print "Stop", timers[i].name, timers[i].duration()
 			save_changes = True
-		elif now < timer_end(t):
-			timers[i] = (timer_name(t), timer_start(t), now)
-			print "Adjust", timer_name(t)
-			print "  before", timer_start(t), timer_end(t)
-			print "   after", timer_start(timers[i]), timer_end(timers[i])
+		elif now < t.end:
+			timers[i] = Timer(t.name, t.start, now)
+			print "Adjust", t.name
+			print "  before", t.start, t.end
+			print "   after", timers[i].start, timers[i].end
 			save_changes = True
 		else:
 			break
 
 def start_timer(name):
 	global save_changes, timers
-	t = (name, now, None)
-	timers.append(t)
+	timers.append(Timer(name, now))
 	save_changes = True
 	print "Start", name, now
 
 def same_day(prev_date, date):
-	 return (prev_date.year == date.year and prev_date.month == date.month
-			 and prev_date.day == date.day)
+	return (prev_date.year == date.year and prev_date.month == date.month
+			and prev_date.day == date.day)
 
 def same_week(prev_date, date):
-	# weekday() returns 0 for Monday, 6 for Sunday
-	 return (prev_date.year == date.year and prev_date.month == date.month
-			 and (prev_date.day == date.day or date.weekday() != 6))
+	# The weeknumber in isocalendar() start with Monday
+	return (prev_date.year == date.year and prev_date.month == date.month
+			and prev_date.isocalendar()[1] == date.isocalendar()[1])
 
 def same_month(prev_date, date):
-	 return prev_date.year == date.year and prev_date.month == date.month
+	return prev_date.year == date.year and prev_date.month == date.month
 		
 def add_duration(timer, total):
-	n = timer_name(timer)
-	d = timer_duration(timer)
+	n = timer.name
+	d = timer.duration()
 	if n in total:
 		total[n] += d
 	else:
@@ -318,12 +314,14 @@ def print_daily(date, total):
 		print " ", total[d], d
 
 def print_weekly(date, total):
-	print 'week  {:%Y-%m-%d}'.format(date)
+	# weekday() returns Monday as 0
+	first = datetime.date.fromordinal(date.toordinal()-date.weekday())
+	print 'week  {:%Y-%m-%d}'.format(first)
 	for d in total:
 		print " ", total[d], d
 
 def print_monthly(date, total):
-	print 'month {:%m}'.format(date)
+	print 'month {:%Y-%m}'.format(date)
 	for d in total:
 		print " ", total[d], d
 
@@ -331,12 +329,12 @@ def report():
 	if len(timers) == 0:
 		print "No timers to report"
 		return
-	prev_date = timer_start(timers[0])
+	prev_date = timers[0].start
 	daily_total = {}
 	weekly_total = {}
 	monthly_total = {}
 	for t in timers:
-		date = timer_start(t)
+		date = t.start
 		if not same_day(prev_date, date):
 			print_daily(prev_date, daily_total)
 			daily_total = {}
