@@ -308,22 +308,31 @@ def add_duration(timer, total):
 	else:
 		total[n] = d
 
+def duration_str(d):
+	minutes, seconds = divmod(d.total_seconds()+59, 60)
+	hours, minutes = divmod(minutes, 60)
+	return '{:>3d}:{:>02d}'.format(int(hours), int(minutes))
+
+def print_durations(total):
+	t = datetime.timedelta(0)
+	for d in total:
+		print " ", duration_str(total[d]), d
+		t = t + total[d]
+	print " ", duration_str(t), "TOTAL"
+
 def print_daily(date, total):
 	print 'day   {:%Y-%m-%d}'.format(date)
-	for d in total:
-		print " ", total[d], d
+	print_durations(total)
 
 def print_weekly(date, total):
 	# weekday() returns Monday as 0
 	first = datetime.date.fromordinal(date.toordinal()-date.weekday())
 	print 'week  {:%Y-%m-%d}'.format(first)
-	for d in total:
-		print " ", total[d], d
+	print_durations(total)
 
 def print_monthly(date, total):
 	print 'month {:%Y-%m}'.format(date)
-	for d in total:
-		print " ", total[d], d
+	print_durations(total)
 
 def report():
 	if len(timers) == 0:
