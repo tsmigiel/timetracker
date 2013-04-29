@@ -106,19 +106,29 @@ parser.add_option("-l", "--leap",
 # One nasty requirement of globals is having to declare them as global in
 # functions, which leads to non-obvious errors when you don't.
 
-version = 1
+version = 2
 name_map = {}
 timers = []
 save_changes = False
+tag_char = "@"
 
 # Save it, because at least 1 option will change it.
 now = datetime.datetime.now().replace(microsecond=0)
 
 class Timer:
-	def __init__(self, name, start, end = None):
-		self.name = name
+
+	def __init__(self, name, comment, start, end = None):
+		self.name = name.strip()
+		self.comment = comment.strip()
 		self.start = start
 		self.end = end
+		# Find words that start with tag_char.  include tag_char so it is
+		# obvious when used for things like reporting
+		s = " ".join([self.name, self.comment])
+		pat = re.compile("".join(["(", tag_char, "\w+)"]))
+		self.tags = frozenset(pat.findall(s))
+		if not self.tags:
+			self.tags = frozenset(["No tags"])
 
 	def active(self):
 		return self.end == None
@@ -138,7 +148,8 @@ def main():
 		load(fname)
 	name = None
 	if args:
-		name = resolve_name(" ".join(args))
+		name, sep, comment = " ".join(args).partition(":")
+		name = resolve_name(name)
 	if options.leap:
 		now = now - datetime.timedelta(seconds = options.leap*60)
 	if options.stop:
@@ -147,7 +158,7 @@ def main():
 		handle_map(options.mapname, name)
 	elif name:
 		stop_timer()
-		start_timer(name)
+		start_timer(name, comment)
 	elif options.report:
 		report()
 	elif len(timers) > 0 and timers[-1].active():
@@ -175,18 +186,24 @@ def load(fname):
 	with open(fname, "rb") as f:
 		load_version = 0
 		for line in f:
-			field = line.strip().split('\t')
+			field = line.rstrip('\r\n').split('\t')
 			if field[0] == 'MAP':
 				name_map[field[1]] = field[2]
+			elif field[0] == 'TAGCHAR':
+				tag_char = field[1]
 			elif field[0] == 'TIMER':
-				if load_version > 0:
+				if load_version > 1:
 					start = date_from_str(field[1])
 					stop = date_from_str(field[2])
-					timers.append(Timer(field[3], start, stop))
+					timers.append(Timer(field[3], field[4], start, stop))
+				elif load_version == 1:
+					start = date_from_str(field[1])
+					stop = date_from_str(field[2])
+					timers.append(Timer(field[3], "", start, stop))
 				else:
 					start = date_from_str(field[2])
 					stop = date_from_str(field[3])
-					timers.append(Timer(field[1], start, stop))
+					timers.append(Timer(field[1], "", start, stop))
 			elif field[0] == 'VERSION':
 				load_version = int(field[1])
 		if options.verbose:
@@ -220,7 +237,7 @@ def save(fname):
 		for t in timers:
 			start = date_to_str(t.start)
 			stop = date_to_str(t.end)
-			f.write('TIMER\t{}\t{}\t{}\n'.format(start, stop, t.name))
+			f.write('TIMER\t{}\t{}\t{}\t{}\n'.format(start, stop, t.name, t.comment))
 		if options.verbose:
 			print "saved", len(name_map), "maps,", len(timers), "timers"
 
@@ -264,27 +281,28 @@ def stop_timer():
 	for i in xrange(len(timers)-1, -1, -1):
 		t = timers[i]
 		if now < t.start:
-			timers[i] = Timer(t.name, now, now)
 			print "Adjust", t.name
 			print "  before", t.start, t.end
-			print "   after", timers[i].start, timers[i].end
+			t.start = now
+			t.end = now
+			print "   after", t.start, t.end
 			save_changes = True
 		elif t.active():
-			timers[i] = Timer(t.name, t.start, now)
-			print "Stop", timers[i].name, timers[i].duration()
+			t.end = now
+			print "Stop", t.name, t.duration()
 			save_changes = True
 		elif now < t.end:
-			timers[i] = Timer(t.name, t.start, now)
 			print "Adjust", t.name
 			print "  before", t.start, t.end
-			print "   after", timers[i].start, timers[i].end
+			t.end = now
+			print "   after", t.start, t.end
 			save_changes = True
 		else:
 			break
 
-def start_timer(name):
+def start_timer(name, comment):
 	global save_changes, timers
-	timers.append(Timer(name, now))
+	timers.append(Timer(name, comment, now))
 	save_changes = True
 	print "Start", name, now
 
@@ -303,22 +321,29 @@ def same_month(prev_date, date):
 def add_duration(timer, total):
 	n = timer.name
 	d = timer.duration()
-	if n in total:
-		total[n] += d
+	if n in total[0]:
+		total[0][n] += d
 	else:
-		total[n] = d
+		total[0][n] = d
+	for t in timer.tags:
+		if t in total[1]:
+			total[1][t] += d
+		else:
+			total[1][t] = d
 
 def duration_str(d):
-	minutes, seconds = divmod(d.total_seconds()+59, 60)
+	minutes, seconds = divmod(d.total_seconds(), 60)
 	hours, minutes = divmod(minutes, 60)
 	return '{:>3d}:{:>02d}'.format(int(hours), int(minutes))
 
 def print_durations(total):
 	t = datetime.timedelta(0)
-	for d in total:
-		print " ", duration_str(total[d]), d
-		t = t + total[d]
+	for d in total[0]:
+		print " ", duration_str(total[0][d]), d
+		t = t + total[0][d]
 	print " ", duration_str(t), "TOTAL"
+	for d in total[1]:
+		print " ", duration_str(total[1][d]), d
 
 def print_daily(date, total):
 	print 'day   {:%Y-%m-%d}'.format(date)
@@ -339,20 +364,20 @@ def report():
 		print "No timers to report"
 		return
 	prev_date = timers[0].start
-	daily_total = {}
-	weekly_total = {}
-	monthly_total = {}
+	daily_total = ({}, {})
+	weekly_total = ({}, {})
+	monthly_total = ({}, {})
 	for t in timers:
 		date = t.start
 		if not same_day(prev_date, date):
 			print_daily(prev_date, daily_total)
-			daily_total = {}
+			daily_total = ({}, {})
 		if not same_week(prev_date, date):
 			print_weekly(prev_date, weekly_total)
-			weekly_total = {}
+			weekly_total = ({}, {})
 		if not same_month(prev_date, date):
 			print_monthly(prev_date, monthly_total)
-			monthly_total = {}
+			monthly_total = ({}, {})
 		add_duration(t, monthly_total)
 		add_duration(t, weekly_total)
 		add_duration(t, daily_total)
