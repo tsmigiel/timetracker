@@ -2,11 +2,23 @@
 #
 #  TimeTracker
 #
+#  typical usage:
+#    ln -snf /path/to/timetracker.py ~/bin/tt
+#    or alias tt="/path/to/timetracker.py"
+#    tt  name of a timer [@tag]* [: comment]  # start a timer
+#    tt  -l M|--leap M   name...  # start a timer M minutes ago
+#    tt  -s|--stop     # stop active timer
+#    tt                # prints active timer
+#    tt  -r|--report   # prints a report
+#    tt  -c|--calendar # a report like a calendar
+#
 #  Keep track of timers.  Only one timer is ever running at a time.
-#  When run with no arguments print a report.
+#  When run with no arguments print the duration of the active timer.
 #  When run with position arguments, create a new timer with the arguments as
 #  the name.  If there is more than 1 positional argument, they are combined
-#  with spaces to make 1 name.
+#  with spaces to make 1 name.  Any word prefixed with @ is a tag which can be
+#  used while printing reports.  Each timer can also have a comment which is
+#  started with a :.  Comments are not used during name matching.
 #  There is no real connection of one timer to the other, except that reports
 #  will combine timers with the same name in some way.
 #  As a convenience, a name specificed on the command line will be resolved
@@ -38,7 +50,7 @@
 #	   Note that "." will match the most recent timer.
 #	3. Start a new timer with this name.
 #	 
-#  tt -stop   
+#  tt -s|--stop   
 #	Stop any current timer.
 #
 #  tt --map "map from name"  map to name
@@ -61,7 +73,7 @@
 #  Basic operation:
 #  1. read file of map and timers
 #  2. parse and handle arguments
-#	 - print a report when no options or arguments
+#	 - print the active timer when no options or arguments
 #	 - start new timer when just name arguments
 #	 - handle special options
 #  3. save file
@@ -94,6 +106,12 @@ parser.add_option("-s", "--stop",
 				  help="stop any current timer")
 parser.add_option("-r", "--report",
 				  action="store_true", dest="report", default=False,
+				  help="generate a report")
+# TODO: This would be nicer as --report=cal, the above could be --report=list,
+# and set the default for --report accordingly. Can also set report default in
+# data file.
+parser.add_option("-c", "--report-cal",
+				  action="store_true", dest="report_cal", default=False,
 				  help="generate a report")
 parser.add_option("-l", "--leap",
 				  dest="leap", metavar="N", type="int",
@@ -161,6 +179,8 @@ def main():
 		start_timer(name, comment)
 	elif options.report:
 		report()
+	elif options.report_cal:
+		report_cal()
 	elif len(timers) > 0 and timers[-1].active():
 		d = int(timers[-1].duration().total_seconds() / 60)
 		print "{} {:d}:{:02d}".format(timers[-1].name, d / 60, d % 60)
@@ -334,7 +354,11 @@ def add_duration(timer, total):
 def duration_str(d):
 	minutes, seconds = divmod(d.total_seconds(), 60)
 	hours, minutes = divmod(minutes, 60)
-	return '{:>3d}:{:>02d}'.format(int(hours), int(minutes))
+	if hours != 0 or minutes != 0:
+		return '{:>3d}:{:>02d}'.format(int(hours), int(minutes))
+	if seconds != 0:
+		return '   .{:>02d}'.format(int(seconds))
+	return '      '
 
 def print_durations(total):
 	t = datetime.timedelta(0)
@@ -386,6 +410,82 @@ def report():
 	print_weekly(prev_date, weekly_total)
 	print_monthly(prev_date, monthly_total)
 
+def add_duration_week(timer, total):
+	day = timer.start.weekday()
+	n = timer.name
+	d = timer.duration()
+	if n not in total[0]:
+		total[0][n] = [ datetime.timedelta(0) ] * 8
+	total[0][n][day] += d
+	total[0][n][7] += d
+	for t in timer.tags:
+		if t not in total[1]:
+			total[1][t] = [ datetime.timedelta(0) ] * 8
+		total[1][t][day] += d
+		total[1][t][7] += d
+
+def print_durations_week(total):
+	# TODO: format the name at the end of a line to fit the terminal width.
+	t = [ datetime.timedelta(0) ] * 8
+	print "    Mon    Tue    Wed    Thu    Fri    Sat    Sun  Total  Name"
+	for n in sorted(total[0].keys()):
+		line = ""
+		for day in xrange(0, 8):
+			line += " " + duration_str(total[0][n][day])
+			t[day] = t[day] + total[0][n][day]
+		line += "  " + n
+		print line
+	line = ""
+	for day in xrange(0, 8):
+		line += " " + duration_str(t[day])
+	line += "  TOTAL"
+	print line
+	print " ", "-" * 76
+	for n in sorted(total[1].keys()):
+		line = ""
+		for day in xrange(0, 8):
+			line += " " + duration_str(total[1][n][day])
+			t[day] = t[day] + total[1][n][day]
+		line += "  " + n
+		print line
+	line = ""
+	for day in xrange(0, 8):
+		line += " " + duration_str(t[day])
+	line += "  TOTAL"
+	print line
+	print " ", "-" * 76
+
+def print_weekly_cal(date, total):
+	# weekday() returns Monday as 0
+	first = datetime.date.fromordinal(date.toordinal()-date.weekday())
+	# print 'week  {:%Y-%m-%d}'.format(first)
+	line = ""
+	for day in xrange(0, 7):
+		line += '  {:%m-%d}'.format(first + datetime.timedelta(days=day))
+	print line
+	print_durations_week(total)
+
+def report_cal():
+	if len(timers) == 0:
+		print "No timers to report"
+		return
+	prev_date = timers[0].start
+	weekly_total = ({}, {})
+	monthly_total = ({}, {})
+	for t in timers:
+		date = t.start
+		if not same_week(prev_date, date):
+			print_weekly_cal(prev_date, weekly_total)
+			weekly_total = ({}, {})
+		if not same_month(prev_date, date):
+			print_monthly(prev_date, monthly_total)
+			monthly_total = ({}, {})
+		add_duration(t, monthly_total)
+		add_duration_week(t, weekly_total)
+		prev_date = date
+	print_weekly_cal(prev_date, weekly_total)
+	print_monthly(prev_date, monthly_total)
+	
 main()
 
 # vim: tabstop=4:shiftwidth=4:noexpandtab
