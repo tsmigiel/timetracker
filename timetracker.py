@@ -362,12 +362,12 @@ def duration_str(d):
 
 def print_durations(total):
 	t = datetime.timedelta(0)
-	for d in total[0]:
-		print " ", duration_str(total[0][d]), d
-		t = t + total[0][d]
+	for n in sorted(total[0].keys()):
+		print " ", duration_str(total[0][n]), n
+		t = t + total[0][n]
 	print " ", duration_str(t), "TOTAL"
-	for d in total[1]:
-		print " ", duration_str(total[1][d]), d
+	for n in sorted(total[1].keys()):
+		print " ", duration_str(total[1][n]), n
 
 def print_daily(date, total):
 	print 'day   {:%Y-%m-%d}'.format(date)
