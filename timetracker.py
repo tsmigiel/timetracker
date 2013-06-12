@@ -427,42 +427,44 @@ def add_duration_week(timer, total):
 def print_durations_week(total):
 	# TODO: format the name at the end of a line to fit the terminal width.
 	t = [ datetime.timedelta(0) ] * 8
-	print "    Mon    Tue    Wed    Thu    Fri    Sat    Sun  Total  Name"
+	print "-" * 78
 	for n in sorted(total[0].keys()):
 		line = ""
 		for day in xrange(0, 8):
-			line += " " + duration_str(total[0][n][day])
+			line += duration_str(total[0][n][day]) + " "
 			t[day] = t[day] + total[0][n][day]
-		line += "  " + n
+		line += " " + n
 		print line
 	line = ""
 	for day in xrange(0, 8):
-		line += " " + duration_str(t[day])
-	line += "  TOTAL"
+		line += duration_str(t[day]) + " "
+	line += " TOTAL"
 	print line
-	print " ", "-" * 76
+	print "-" * 78
 	for n in sorted(total[1].keys()):
 		line = ""
 		for day in xrange(0, 8):
-			line += " " + duration_str(total[1][n][day])
-			t[day] = t[day] + total[1][n][day]
-		line += "  " + n
+			line += duration_str(total[1][n][day]) + " "
+		line += " " + n
 		print line
-	line = ""
-	for day in xrange(0, 8):
-		line += " " + duration_str(t[day])
-	line += "  TOTAL"
-	print line
-	print " ", "-" * 76
+	print "=" * 78
 
 def print_weekly_cal(date, total):
 	# weekday() returns Monday as 0
 	first = datetime.date.fromordinal(date.toordinal()-date.weekday())
 	# print 'week  {:%Y-%m-%d}'.format(first)
 	line = ""
+	line2 = ""
 	for day in xrange(0, 7):
-		line += '  {:%m-%d}'.format(first + datetime.timedelta(days=day))
+		d = first + datetime.timedelta(days=day)
+		if same_month(date, d):
+			line += ' {:%m-%d} '.format(d)
+			line2 += '   {:%a} '.format(d)
+		else:
+			line += '       '
+			line2 += '       '
 	print line
+	print line2, "Total  Name"
 	print_durations_week(total)
 
 def report_cal():
@@ -474,12 +476,14 @@ def report_cal():
 	monthly_total = ({}, {})
 	for t in timers:
 		date = t.start
-		if not same_week(prev_date, date):
+		if not same_month(prev_date, date):
+			print_weekly_cal(prev_date, weekly_total)
+			print_monthly(prev_date, monthly_total)
+			weekly_total = ({}, {})
+			monthly_total = ({}, {})
+		elif not same_week(prev_date, date):
 			print_weekly_cal(prev_date, weekly_total)
 			weekly_total = ({}, {})
-		if not same_month(prev_date, date):
-			print_monthly(prev_date, monthly_total)
-			monthly_total = ({}, {})
 		add_duration(t, monthly_total)
 		add_duration_week(t, weekly_total)
 		prev_date = date
