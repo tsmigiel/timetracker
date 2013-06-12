@@ -427,7 +427,6 @@ def add_duration_week(timer, total):
 def print_durations_week(total):
 	# TODO: format the name at the end of a line to fit the terminal width.
 	t = [ datetime.timedelta(0) ] * 8
-	print "-" * 78
 	for n in sorted(total[0].keys()):
 		line = ""
 		for day in xrange(0, 8):
@@ -471,6 +470,7 @@ def report_cal():
 	if len(timers) == 0:
 		print "No timers to report"
 		return
+	print "=" * 78
 	prev_date = timers[0].start
 	weekly_total = ({}, {})
 	monthly_total = ({}, {})
@@ -479,6 +479,7 @@ def report_cal():
 		if not same_month(prev_date, date):
 			print_weekly_cal(prev_date, weekly_total)
 			print_monthly(prev_date, monthly_total)
+			print "=" * 78
 			weekly_total = ({}, {})
 			monthly_total = ({}, {})
 		elif not same_week(prev_date, date):
