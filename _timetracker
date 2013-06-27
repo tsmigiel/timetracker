@@ -1,0 +1,49 @@
+#compdef timetracker
+# ZSH completion for timetracker tool.
+# To use, place in your $fpath (ZSH function search path) and add something
+# like the following to your .zshrc:
+#  autoload -U compinit _timetracker
+#  compinit
+
+# Tweak this variable to control how many old timetracker entries
+# to consider for autocompletion.
+# LIMITATION: This number needs to be < lines in .timetracker otherwise
+# bad things happen.
+local num_entries=128
+
+typeset -A opt_args
+typeset -A timers
+local adj_num
+local i
+
+_arguments \
+  "(-h --help)"{-h,--help}"[display this help and exit]" \
+  "(-f --file)"{-f,--file=}"[use FILE for time tracker data]" \
+  "(-v --verbose)"{-v,--verbose}"[print status messages to stdout]" \
+  "(-e --explicit)"{-e,--explicit}"[use this name explicitly, don't use map or search]" \
+  "(-m --MAP)"{-m,--map=}"[map NAME to a name from the position arguments]" \
+  "(-s --stop)"{-s,--stop}"[stop current timer]" \
+  "(-r --report)"{-r,--report}"[generate a report]" \
+  "(-c --report-cal)"{-c,--report-cal}"[generate a calender report]" \
+  "(-l --leap)"{-l,--leap=}"[do a quantum leap]" \
+  && return 0
+
+
+# This is an ugly hack.  I am sure there is a more elegant way to extract
+# the tasks, but this works well enough.
+i=0
+let adj_num=${num_entries}-1
+tail -n $num_entries ~/.timetracker | head -n $adj_num | awk -v nr=6 '{
+    for (x=nr; x <= NF; ++x) {
+        printf "%s%s",sep,$x; sep=FS
+    }; 
+    print""
+}' | uniq |
+while read line ; do
+    timers[$i]=$line
+    ((i++))
+done
+
+_values $timers && return 0
+
+return 1
