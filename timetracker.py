@@ -116,6 +116,13 @@ parser.add_option("-c", "--report-cal",
 parser.add_option("-l", "--leap",
 				  dest="leap", metavar="N", type="int",
 				  help="Do a quantum leap to N minutes ago and run the command from that time")
+parser.add_option("-a", "--at",
+				  dest="at_time", metavar="N", type="str",
+				  help="Start timer as if it was today at HH:MM (24-hour clock)")
+
+parser.add_option("-b", "--report-break-in-service",
+				  action="store_true", dest="report_break_in_service", default=False,
+				  help="generate a break in service report")
 
 (options, args) = parser.parse_args()
 
@@ -170,6 +177,9 @@ def main():
 		name = resolve_name(name)
 	if options.leap:
 		now = now - datetime.timedelta(seconds = options.leap*60)
+	if options.at_time:
+		clock = datetime.datetime.strptime(options.at_time, "%H:%M")
+		now = now.replace(hour = clock.hour, minute = clock.minute, second = 0, microsecond = 0)
 	if options.stop:
 		stop_timer()
 	elif options.mapname:
@@ -181,6 +191,8 @@ def main():
 		report()
 	elif options.report_cal:
 		report_cal()
+	elif options.report_break_in_service:
+		report_break_in_service()
 	elif len(timers) > 0 and timers[-1].active():
 		d = int(timers[-1].duration().total_seconds() / 60)
 		print "{} {:d}:{:02d}".format(timers[-1].name, d / 60, d % 60)
@@ -301,7 +313,7 @@ def stop_timer():
 	for i in xrange(len(timers)-1, -1, -1):
 		t = timers[i]
 		if now < t.start:
-			print "Adjust", t.name
+			print "Adjust:", t.name
 			print "  before", t.start, t.end
 			t.start = now
 			t.end = now
@@ -309,10 +321,10 @@ def stop_timer():
 			save_changes = True
 		elif t.active():
 			t.end = now
-			print "Stop", t.name, t.duration()
+			print "Stop:", t.name, t.duration()
 			save_changes = True
 		elif now < t.end:
-			print "Adjust", t.name
+			print "Adjust:", t.name
 			print "  before", t.start, t.end
 			t.end = now
 			print "   after", t.start, t.end
@@ -324,11 +336,10 @@ def start_timer(name, comment):
 	global save_changes, timers
 	timers.append(Timer(name, comment, now))
 	save_changes = True
-	print "Start", name, now
+	print "Start:", name, now
 
 def same_day(prev_date, date):
-	return (prev_date.year == date.year and prev_date.month == date.month
-			and prev_date.day == date.day)
+	return prev_date.toordinal() == date.toordinal()
 
 def same_week(prev_date, date):
 	# The weeknumber in isocalendar() start with Monday
@@ -490,7 +501,17 @@ def report_cal():
 		prev_date = date
 	print_weekly_cal(prev_date, weekly_total)
 	print_monthly(prev_date, monthly_total)
-	
+
+def report_break_in_service():
+	prev_date = timers[0].start
+	for t in timers:
+		date = t.start
+		start_break = prev_date.toordinal() + 1
+		end_break = date.toordinal() - 1
+		if end_break - start_break + 1 > 3:
+			print '{:%b %d} - {:%b %d}  {:2d} days'.format(datetime.date.fromordinal(start_break), datetime.date.fromordinal(end_break), end_break - start_break + 1)
+		prev_date = date
+
 main()
 
 # vim: tabstop=4:shiftwidth=4:noexpandtab
