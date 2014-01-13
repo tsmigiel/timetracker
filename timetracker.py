@@ -2,70 +2,87 @@
 #
 #  TimeTracker
 #
-#  typical usage:
-#    ln -snf /path/to/timetracker.py ~/bin/tt
-#    or alias tt="/path/to/timetracker.py"
-#    tt  name of a timer [@tag]* [: comment]  # start a timer
-#    tt  -l M|--leap M   name...  # start a timer M minutes ago
-#    tt  -s|--stop     # stop active timer
-#    tt                # prints active timer
-#    tt  -r|--report   # prints a report
-#    tt  -c|--calendar # a report like a calendar
-#
-#  Keep track of timers.  Only one timer is ever running at a time.
-#  When run with no arguments print the duration of the active timer.
-#  When run with position arguments, create a new timer with the arguments as
-#  the name.  If there is more than 1 positional argument, they are combined
-#  with spaces to make 1 name.  Any word prefixed with @ is a tag which can be
-#  used while printing reports.  Each timer can also have a comment which is
-#  started with a :.  Comments are not used during name matching.
-#  There is no real connection of one timer to the other, except that reports
-#  will combine timers with the same name in some way.
-#  As a convenience, a name specificed on the command line will be resolved
-#  through the following steps:
-#	1) do a regular expression search starting with the most recent timer and
-#	   use the first match as the name
-#	2) use the name as is
-#
-#  USAGE
-#
-#  tt
-#	generated a report.  Various options control the type of report.
-#
-#  tt [-e|--explicit] name 
-#	1. Stop any current timer.
-#	2. Resolve name (unless -e).  Combine all positional arguments into a
-#	   single, space separated name. (It is ok to use quotes on the command
-#	   line to create a single argument.  Of course, the command line goes
-#	   through any usual shell parsing.)  That name is resolved into the final
-#	   timer name through the following steps:
-#		 1) do a regular expression search starting with the most recent timer
-#			and use the first match as the name
-#		 2) use the name as is
-#	   Note that "." will match the most recent timer.
-#	3. Start a new timer with this name.
-#	 
-#  tt -s|--stop   
-#	Stop any current timer.
-#
-#
-#  IMPLEMENTATION
-#
-#  There is only one data structures.
-#  1. array of timers
-#	 - record start time, end time, and name
-#	  - tuple of (string, datetime, datetime)
-#  2. TODO: an array to archive older timers so they aren't include in reports
-#	 or searches
-#  
-#  Basic operation:
-#  1. read file of timers
-#  2. parse and handle arguments
-#	 - print the active timer when no options or arguments
-#	 - start new timer when just name arguments
-#	 - handle special options
-#  3. save file
-#
+help_text = """
+Setup:
+  Copy timetracker.py somewhere.
+  Create a shorthand called tt.  For example:
+  - ln -snf /path/to/timetracker.py ~/bin/tt
+  - alias tt="/path/to/timetracker.py"
+
+Typical usage:
+  tt  name...       # start a timer
+  tt  -l|--leap M name...  # start a timer M minutes ago
+  tt  -a|--at HH:MM name...  # start a timer at HH:MM (24-hour clock)
+  tt  -s|--stop     # stop active timer
+  tt                # prints active timer
+  tt  -r|--report   # prints a report
+  tt  -c|--calendar # a report like a calendar
+
+  name... - {[@]word}+ 
+  The list of words indicate the name.  It will do a RE search for the most
+  recent matching name, otherwise use the words as is.  Timers with the same
+  name are combined in reports.  One or more words can be prefixed with @ to
+  indicate a tag.  Reports will show the total time of each tag.
+
+Gui usage
+  The current timer is the first row and is prefixed with + when active.
+  Durations are rounded up to the next minute.
+
+  Stop - stop any active timer
+  Start/Run - start the currently selected row by running tt with the text box
+              as arguments (not searching names) or edit the text box to run
+			  aribtrary arguments
+  Reload - reload the timer in case they were modified somewhere else
+  Stdout - open a window displaying stdout (useful to see reports)
+  Help - open a window with this message
+
+  Double clicking on a row will start a new timer with exactly that name.
+  Press enter in text box will run tt with the text as is, i.e., potentially
+  searching for a timer name.
+
+Examples:
+  tt @tc-123 bug 456 bad cse
+  tt @tc-222 bug 333 optnone
+  tt @tc-123 # uses the previous matching name 
+  tt -l 20 @tc-222  # oops, should have started the timer 20 minutes ago
+  tt @lunch
+  tt -a 14:00 @tc-222  # oops, forgot to start the timer after lunch
+  tt -s
+  tt -r
+  tt -c
+
+Keep track of timers.  Only one timer is ever running at a time.
+When run with no arguments print the duration of the active timer.
+When run with position arguments, create a new timer with the arguments as
+the name.  If there is more than 1 positional argument, they are combined
+with spaces to make 1 name.  Any word prefixed with @ is a tag which can be
+used while printing reports.  Each timer can also have a comment which is
+started with a :.  Comments are not used during name matching.
+There is no real connection of one timer to the other, except that reports
+will combine timers with the same name in some way.
+As a convenience, a name specified on the command line will be resolved
+through the following steps:
+ 1) do a regular expression search starting with the most recent timer and
+    use the first match as the name
+ 2) use the name as is
+
+IMPLEMENTATION
+
+There is only one data structures.
+1. array of timers
+  - record start time, end time, and name
+   - tuple of (string, datetime, datetime)
+2. TODO: an array to archive older timers so they aren't include in reports
+  or searches
+
+Basic operation:
+1. read file of timers
+2. parse and handle arguments
+  - print the active timer when no options or arguments
+  - start new timer when just name arguments
+  - handle special options
+3. save file
+"""
 
 import sys
 import os
@@ -109,7 +126,11 @@ parser.add_option("-b", "--report-break-in-service",
 				  action="store_true", dest="report_break_in_service", default=False,
 				  help="generate a break in service report")
 
-(options, args) = parser.parse_args()
+parser.add_option("-g", "--gui",
+				  action="store_true", dest="gui", default=False,
+				  help="Run a simple Qt gui (ignores other arguments)")
+
+(options, optargs) = parser.parse_args()
 
 # TODO: Hmm, it's convenient to use globals, but should I not use them? I was
 # trying to avoid creating a class, but that might be the best solution. 
@@ -144,7 +165,7 @@ class Timer:
 
 	def duration(self):
 		if self.active():
-			dur = now - self.start
+			dur = datetime.datetime.now().replace(microsecond=0) - self.start
 		else:
 			dur = self.end - self.start
 		return dur
@@ -156,8 +177,11 @@ def main():
 	if os.path.exists(fname):
 		load(fname)
 	name = None
-	if args:
-		name, sep, comment = " ".join(args).partition(":")
+	if options.gui:
+		gui()
+		return
+	if optargs:
+		name, sep, comment = " ".join(optargs).partition(":")
 		name = resolve_name(name)
 	if options.leap:
 		now = now - datetime.timedelta(seconds = options.leap*60)
@@ -195,6 +219,7 @@ def date_to_str(date):
 
 def load(fname):
 	global timers, save_changes
+	timers = []
 	if options.verbose:
 		print "loading", fname
 	with open(fname, "rb") as f:
@@ -473,6 +498,174 @@ def report_break_in_service():
 		if end_break - start_break + 1 > 3:
 			print '{:%b %d} - {:%b %d}  {:2d} days'.format(datetime.date.fromordinal(start_break), datetime.date.fromordinal(end_break), end_break - start_break + 1)
 		prev_date = date
+
+# Looks messy but I kept it in the same file for easy installation
+def gui():
+	from PySide import QtCore
+	from PySide import QtGui
+	global timers, reportwin
+
+	class TextWindow(QtGui.QWidget):
+		def __init__(self, title, text, parent=None):
+			super(TextWindow, self).__init__(parent)
+			self.setWindowTitle(title)
+			self.resize(750, 300)
+			self.textedit = QtGui.QTextEdit(self)
+			self.textedit.setFont(QtGui.QFont("Courier New", 14))
+			self.textedit.setReadOnly(True)
+			self.textedit.setPlainText(text)
+			vb = QtGui.QVBoxLayout()
+			vb.addWidget(self.textedit)
+			self.setLayout(vb)
+		def write(self, txt):
+			self.textedit.insertPlainText(str(txt))
+
+	# Display the latest 100 timer names and duration, most recent first.
+	class TimerTableModel(QtCore.QAbstractTableModel):
+		def __init__(self, parent, header, *args):
+			QtCore.QAbstractTableModel.__init__(self, parent, *args)
+			self.header = header
+		def rowCount(self, parent):
+			return min(100,len(timers))
+		def columnCount(self, parent):
+			return 2
+		def data(self, index, role):
+			if not index.isValid():
+				return None
+			elif role != QtCore.Qt.DisplayRole:
+				return None
+			t = timers[-1-index.row()]
+			if index.column() == 0:
+				return t.name
+			elif index.column() == 1:
+				d = int((t.duration().total_seconds() + 60) / 60) # round up 
+				if t.active():
+					prefix = "+"
+				else:
+					prefix = " "
+				return prefix + "{:d}:{:02d}".format(int(d / 60), d % 60)
+			return None
+		def headerData(self, col, orientation, role):
+			if orientation == QtCore.Qt.Horizontal and role == QtCore.Qt.DisplayRole:
+				return self.header[col]
+			return None
+		def getName(self,row):
+			return timers[-1-row].name
+
+	app = QtGui.QApplication(sys.argv)
+	app.setApplicationName("TimeTracker")
+
+	# Redirect stdout to a window (that implements write())
+	reportwin = TextWindow("Stdout", "")
+	sys.stdout = reportwin
+
+	win = QtGui.QMainWindow()
+	win.setWindowTitle('Time Tracker')
+	win.resize(300, 450)
+
+	statusbar = QtGui.QStatusBar()
+	win.setStatusBar(statusbar)
+	statusbar.showMessage("ready")
+
+	central = QtGui.QWidget(win)
+	win.setCentralWidget(central)
+	layout = QtGui.QVBoxLayout()
+	central.setLayout(layout)
+	entry = QtGui.QLineEdit(central)
+	layout.addWidget(entry)
+	table_model = TimerTableModel(central, ['timer', 'duration'])
+	table_view = QtGui.QTableView()
+	table_view.setModel(table_model)
+	table_view.setFont(QtGui.QFont("Courier New", 14))
+	table_view.setSelectionBehavior(QtGui.QAbstractItemView.SelectRows)
+	table_view.setSelectionMode(QtGui.QAbstractItemView.SingleSelection)
+	table_view.horizontalHeader().setResizeMode(0, QtGui.QHeaderView.Stretch)
+	table_view.resizeColumnsToContents()
+	layout.addWidget(table_view)
+
+	# A timer to update duration of an active task.
+	# TODO: only run the timer when there is an active task
+	def updateTimer():
+		if timers[-1].active():
+			index = table_model.createIndex(0, 1, None)
+			table_model.dataChanged.emit(index, index)
+	timer = QtCore.QTimer()
+	timer.setInterval(30000) # 30 seconds
+	timer.timeout.connect(updateTimer)
+	timer.start()
+
+	# Re-call main() with new command line (No -g)
+	def run_command(cmd):
+		global options, optargs, parser, now
+		statusbar.showMessage(sys.argv[0] + " " + " ".join(cmd))
+		now = datetime.datetime.now().replace(microsecond=0)
+		(options, optargs) = parser.parse_args(cmd)
+		options.gui = False;
+		main()
+		table_model.reset()
+		sb = table_view.verticalScrollBar()
+		if sb:
+			sb.setSliderPosition(0)
+
+	# A toolbar is an easy way to make a bunch of buttons
+	toolbar = QtGui.QToolBar()
+	def do_stop():
+		run_command(["-s"])
+		return
+	action = QtGui.QAction("Stop", win)
+	action.triggered.connect(do_stop)
+	toolbar.addAction(action)
+	def do_run():
+		run_command(["-e"] + entry.displayText().split())
+	action = QtGui.QAction("Start/Run", win)
+	action.triggered.connect(do_run)
+	toolbar.addAction(action)
+	def do_load():
+		global options
+		fname = os.path.expanduser(options.filename)
+		if os.path.exists(fname):
+			load(fname)
+			table_model.reset()
+			statusbar.showMessage("Reloaded " + fname)
+		else:
+			statusbar.showMessage("Could not reload " + fname)
+	action = QtGui.QAction("Reload", win)
+	action.triggered.connect(do_load)
+	toolbar.addAction(action)
+	def do_report():
+		global reportwin
+		reportwin.show()
+	action = QtGui.QAction("Stdout", win)
+	action.triggered.connect(do_report)
+	toolbar.addAction(action)
+	def do_help():
+		global helpwin
+		helpwin = TextWindow("Help", help_text)
+		helpwin.show()
+	action = QtGui.QAction("Help", win)
+	action.triggered.connect(do_help)
+	toolbar.addAction(action)
+	win.addToolBar(toolbar)
+
+	# Connect table view and line box actions.
+	def on_item_changed(selected, deselected):
+		if selected[0]:
+			entry.setText(table_model.getName(selected[0].top()))
+		else:
+			entry.setText("")
+	def on_item_double(selected):
+		entry.setText(table_model.getName(selected.row()))
+		do_run()
+	def on_return_pressed():
+		run_command(entry.displayText().split())
+	table_view.selectionModel().selectionChanged.connect(on_item_changed)
+	table_view.doubleClicked.connect(on_item_double)
+	entry.returnPressed.connect(on_return_pressed)
+
+	win.show()
+	win.activateWindow()
+	win.raise_()
+	app.exec_()
 
 main()
 
