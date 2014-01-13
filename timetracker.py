@@ -23,13 +23,9 @@
 #  will combine timers with the same name in some way.
 #  As a convenience, a name specificed on the command line will be resolved
 #  through the following steps:
-#	1) look in a map of names to names, and use that mapped name
-#	2) do a regular expression search starting with the most recent timer and
+#	1) do a regular expression search starting with the most recent timer and
 #	   use the first match as the name
-#	3) use the name as is
-#  Maps are created with the -map option.  The argument to map should be a
-#  single argument, and all remaining positional arguments are what it maps
-#  too.  This could be used to make convenient indexes.
+#	2) use the name as is
 #
 #  USAGE
 #
@@ -43,35 +39,27 @@
 #	   line to create a single argument.  Of course, the command line goes
 #	   through any usual shell parsing.)  That name is resolved into the final
 #	   timer name through the following steps:
-#		 1) look in a map of names to names, and use that mapped name
-#		 2) do a regular expression search starting with the most recent timer
+#		 1) do a regular expression search starting with the most recent timer
 #			and use the first match as the name
-#		 3) use the name as is
+#		 2) use the name as is
 #	   Note that "." will match the most recent timer.
 #	3. Start a new timer with this name.
 #	 
 #  tt -s|--stop   
 #	Stop any current timer.
 #
-#  tt --map "map from name"  map to name
-#	Create a map from one name to another.  The first name must be in quotes
-#	because it is an argument to the option.  The "map to name" goes through
-#	the usual name lookup too.  If the "map to name" is empty, the map is
-#	deleted.  Typical example might be to map indexes to full names. 
-#
 #
 #  IMPLEMENTATION
 #
-#  There are only two data structures.
-#  1. dictionary/map of name to name
-#  2. array of timers
+#  There is only one data structures.
+#  1. array of timers
 #	 - record start time, end time, and name
 #	  - tuple of (string, datetime, datetime)
-#  3. TODO: an array to archive older timers so they aren't include in reports
+#  2. TODO: an array to archive older timers so they aren't include in reports
 #	 or searches
 #  
 #  Basic operation:
-#  1. read file of map and timers
+#  1. read file of timers
 #  2. parse and handle arguments
 #	 - print the active timer when no options or arguments
 #	 - start new timer when just name arguments
@@ -97,10 +85,7 @@ parser.add_option("-v", "--verbose",
 				  help="don't print status messages to stdout")
 parser.add_option("-e", "--explicit",
 				  action="store_true", dest="explicit", default=False,
-				  help="use this name explicitly, don't use map or search")
-parser.add_option("-m", "--map",
-				  dest="mapname", metavar="NAME",
-				  help="map NAME to a name from the positional arguments")
+				  help="use this name explicitly, don't search")
 parser.add_option("-s", "--stop",
 				  action="store_true", dest="stop", default=False,
 				  help="stop any current timer")
@@ -132,7 +117,6 @@ parser.add_option("-b", "--report-break-in-service",
 # functions, which leads to non-obvious errors when you don't.
 
 version = 2
-name_map = {}
 timers = []
 save_changes = False
 tag_char = "@"
@@ -182,8 +166,6 @@ def main():
 		now = now.replace(hour = clock.hour, minute = clock.minute, second = 0, microsecond = 0)
 	if options.stop:
 		stop_timer()
-	elif options.mapname:
-		handle_map(options.mapname, name)
 	elif name:
 		stop_timer()
 		start_timer(name, comment)
@@ -212,16 +194,14 @@ def date_to_str(date):
 	return '{:%Y-%m-%d %H:%M:%S}'.format(date)
 
 def load(fname):
-	global name_map, timers, save_changes
+	global timers, save_changes
 	if options.verbose:
 		print "loading", fname
 	with open(fname, "rb") as f:
 		load_version = 0
 		for line in f:
 			field = line.rstrip('\r\n').split('\t')
-			if field[0] == 'MAP':
-				name_map[field[1]] = field[2]
-			elif field[0] == 'TAGCHAR':
+			if field[0] == 'TAGCHAR':
 				tag_char = field[1]
 			elif field[0] == 'TIMER':
 				if load_version > 1:
@@ -239,7 +219,7 @@ def load(fname):
 			elif field[0] == 'VERSION':
 				load_version = int(field[1])
 		if options.verbose:
-			print "loaded", len(name_map), "maps,", len(timers), "timers"
+			print "loaded", len(timers), "timers"
 	if load_version != version:
 		save_changes = True
 
@@ -264,45 +244,27 @@ def save(fname):
 	with open(fname, "wb") as f:
 		# VERSION must be first because loading depends on it.
 		f.write('VERSION\t{}\n'.format(version))
-		for n in name_map:
-			f.write('MAP\t{}\t{}\n'.format(n, name_map[n]))
 		for t in timers:
 			start = date_to_str(t.start)
 			stop = date_to_str(t.end)
 			f.write('TIMER\t{}\t{}\t{}\t{}\n'.format(start, stop, t.name, t.comment))
 		if options.verbose:
-			print "saved", len(name_map), "maps,", len(timers), "timers"
+			print "saved", len(timers), "timers"
 
 def resolve_name(name):
 	if not options.explicit:
-		if name in name_map:
-			name = name_map[name]
-			if options.verbose:
-				print "name in map"
-		else:
-			# TODO:  Hmm, this would get slow if there are too many.  But I
-			# assume even with thousands it would not be noticable.  Could at
-			# least add a command to archive old timers.
-			for t in reversed(timers):
-				if re.search(name, t.name):
-					name = t.name
-					if options.verbose:
-						print "name matches existing timer"
-					break;
+		# TODO:  Hmm, this would get slow if there are too many.  But I
+		# assume even with thousands it would not be noticable.  Could at
+		# least add a command to archive old timers.
+		for t in reversed(timers):
+			if re.search(name, t.name):
+				name = t.name
+				if options.verbose:
+					print "name matches existing timer"
+				break;
 	if options.verbose:
 		print "Using name:", name
 	return name
-
-def handle_map(from_name, to_name):
-	global save_changes, name_map
-	if to_name:
-		name_map[from_name] = to_name
-		save_changes = True
-	elif from_name in name_map:
-		del name_map[from_name]
-		save_changes = True
-	else:
-		print "Map not changed!"
 
 def stop_timer():
 	global save_changes, timers
