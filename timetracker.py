@@ -18,14 +18,18 @@ Typical usage:
   tt  -r|--report   # prints a report
   tt  -c|--calendar # a report like a calendar
 
-  name... - {[@]word}+ 
-  The list of words indicate the name.  It will do a RE search for the most
-  recent matching name, otherwise use the words as is.  Timers with the same
-  name are combined in reports.  One or more words can be prefixed with @ to
-  indicate a tag.  Reports will show the total time of each tag.
+  "name..." above is a list of words, do not put quotes around them.  Any
+  number of words can be prefixed by the tag character, "@".
+
+  The list of words indicate the name of a timer.  timetracker will do an RE
+  search for the most recent matching name.  If a matching name is not found or
+  you passed the -e option the name is used as is. 
+
+  Timers with the same name are combined in reports and typically show the
+  total duration for all timers with that name.
 
 Gui usage
-  The current timer is the first row and is prefixed with + when active.
+  The current timer is the first row and is prefixed with "+" when active.
   Durations are rounded up to the next minute.
 
   Stop - stop any active timer
@@ -39,6 +43,17 @@ Gui usage
   Double clicking on a row will start a new timer with exactly that name.
   Press enter in text box will run tt with the text as is, i.e., potentially
   searching for a timer name.
+
+Settings:
+
+By default timetracker saves data in ~/.timetracker.  By hand you can add the
+following settings to that file, as tab separated fields per line:
+
+Use a different character than @ to mark tags.  (@ works in most shells.)
+	TAGCHAR	@
+
+Use a different font in the Gui:
+	FONT	Courier New	14
 
 Examples:
   tt @tc-123 bug 456 bad cse
@@ -140,7 +155,14 @@ parser.add_option("-g", "--gui",
 version = 2
 timers = []
 save_changes = False
-tag_char = "@"
+
+# These can be changed by settings in a file
+default_tag_char = "@"
+default_font_name = "Courier New"
+default_font_size = 14
+tag_char = default_tag_char
+font_name = default_font_name
+font_size = default_font_size
 
 # Save it, because at least 1 option will change it.
 now = datetime.datetime.now().replace(microsecond=0)
@@ -223,7 +245,7 @@ def date_to_str(date):
 	return '{:%Y-%m-%d %H:%M:%S}'.format(date)
 
 def load(fname):
-	global timers, save_changes
+	global timers, save_changes, font_name, font_size
 	timers = []
 	if options.verbose:
 		print "loading", fname
@@ -233,6 +255,9 @@ def load(fname):
 			field = line.rstrip('\r\n').split('\t')
 			if field[0] == 'TAGCHAR':
 				tag_char = field[1]
+			elif field[0] == 'FONT':
+				font_name = field[1]
+				font_size = field[2]
 			elif field[0] == 'TIMER':
 				if load_version > 1:
 					start = date_from_str(field[1])
@@ -274,6 +299,10 @@ def save(fname):
 	with open(fname, "wb") as f:
 		# VERSION must be first because loading depends on it.
 		f.write('VERSION\t{}\n'.format(version))
+		if tag_char != default_tag_char:
+			f.write('TAGCHAR\t{}'.format(tag_char))
+		if font_name != default_font_name or font_size != default_font_size:
+			f.write('FONT\t{}\t{}'.format(font_name, font_size))
 		for t in timers:
 			start = date_to_str(t.start)
 			stop = date_to_str(t.end)
@@ -516,7 +545,7 @@ def gui():
 			self.setWindowTitle(title)
 			self.resize(750, 300)
 			self.textedit = QtGui.QTextEdit(self)
-			self.textedit.setFont(QtGui.QFont("Courier New", 14))
+			self.textedit.setFont(QtGui.QFont(font_name, font_size))
 			self.textedit.setReadOnly(True)
 			self.textedit.setPlainText(text)
 			vb = QtGui.QVBoxLayout()
@@ -585,7 +614,7 @@ def gui():
 	table_model = TimerTableModel(central, ['timer', 'duration'])
 	table_view = QtGui.QTableView()
 	table_view.setModel(table_model)
-	table_view.setFont(QtGui.QFont("Courier New", 14))
+	table_view.setFont(QtGui.QFont(font_name, font_size))
 	table_view.setSelectionBehavior(QtGui.QAbstractItemView.SelectRows)
 	table_view.setSelectionMode(QtGui.QAbstractItemView.SingleSelection)
 	table_view.horizontalHeader().setResizeMode(0, QtGui.QHeaderView.Stretch)
