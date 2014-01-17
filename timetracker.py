@@ -170,6 +170,11 @@ class Timer:
 			dur = self.end - self.start
 		return dur
 
+	def description(self):
+		if self.end:
+			return "{:%Y-%m-%d %H:%M}-{:%H:%M} | {}".format(self.start, self.end, self.name)
+		return "{:%Y-%m-%d %H:%M}-now | {}".format(self.start, self.name)
+
 
 def main():
 	global now
@@ -532,7 +537,11 @@ def gui():
 		def data(self, index, role):
 			if not index.isValid():
 				return None
-			elif role != QtCore.Qt.DisplayRole:
+			if role == QtCore.Qt.ToolTipRole:
+				t = timers[-1-index.row()]
+				if t:
+					return t.description()
+			if role != QtCore.Qt.DisplayRole:
 				return None
 			t = timers[-1-index.row()]
 			if index.column() == 0:
@@ -549,8 +558,8 @@ def gui():
 			if orientation == QtCore.Qt.Horizontal and role == QtCore.Qt.DisplayRole:
 				return self.header[col]
 			return None
-		def getName(self,row):
-			return timers[-1-row].name
+		def getTimer(self,row):
+			return timers[-1-row]
 
 	app = QtGui.QApplication(sys.argv)
 	app.setApplicationName("TimeTracker")
@@ -596,8 +605,9 @@ def gui():
 
 	# Re-call main() with new command line (No -g)
 	def run_command(cmd):
-		global options, optargs, parser, now
+		global options, optargs, parser, now, save_changes
 		statusbar.showMessage(sys.argv[0] + " " + " ".join(cmd))
+		save_changes = False
 		now = datetime.datetime.now().replace(microsecond=0)
 		(options, optargs) = parser.parse_args(cmd)
 		options.gui = False;
@@ -650,12 +660,17 @@ def gui():
 	# Connect table view and line box actions.
 	def on_item_changed(selected, deselected):
 		if selected[0]:
-			entry.setText(table_model.getName(selected[0].top()))
+			t = table_model.getTimer(selected[0].top())
+			if t:
+				entry.setText(t.name)
+				statusbar.showMessage(t.description())
 		else:
 			entry.setText("")
 	def on_item_double(selected):
-		entry.setText(table_model.getName(selected.row()))
-		do_run()
+		t = table_model.getTimer(selected.row())
+		if t:
+			entry.setText(t.name)
+			do_run()
 	def on_return_pressed():
 		run_command(entry.displayText().split())
 	table_view.selectionModel().selectionChanged.connect(on_item_changed)
