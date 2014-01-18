@@ -558,37 +558,70 @@ def gui():
 	class TimerTableModel(QtCore.QAbstractTableModel):
 		def __init__(self, parent, header, *args):
 			QtCore.QAbstractTableModel.__init__(self, parent, *args)
+			self.create_rows()
 			self.header = header
+		def duration_str(self, timer):
+			d = int((timer.duration().total_seconds() + 60) / 60) # round up 
+			if timer.active():
+				prefix = "+"
+			else:
+				prefix = " "
+			return prefix + "{:d}:{:02d}".format(int(d / 60), d % 60)
+		def create_rows(self):
+			self.rows = []
+			l = len(timers)
+			if l == 0:
+				return
+			t = timers[-1]
+			date_row = 0
+			if t.end:
+				date_end = "{:%H:%M}".format(t.end)
+			else:
+				date_end = "{:%H:%M}+".format(t.start)
+			self.rows.append(None)
+			self.rows.append((t.name, self.duration_str(t), t))
+			for i in range(2, l):
+				pt = timers[-i+1]
+				t = timers[-i]
+				if not same_day(pt.start, t.start):
+					self.rows[date_row] = ("{:%Y-%m-%d %H:%M}-{:s}".format(pt.start, date_end), "", None)
+					if len(self.rows) > 100:
+						date_row = None
+						break
+					date_row = len(self.rows)
+					date_end = "{:%H:%M}".format(t.end)
+					self.rows.append(None)
+				self.rows.append((t.name, self.duration_str(t), t))
+			if date_row:
+				self.rows[date_row] = ("{:%Y-%m-%d %H:%M}-{:s}".format(timers[-l].start, date_end), "", None)
 		def rowCount(self, parent):
-			return min(100,len(timers))
+			return len(self.rows)
 		def columnCount(self, parent):
 			return 2
 		def data(self, index, role):
 			if not index.isValid():
 				return None
+			t = self.rows[index.row()][2]
 			if role == QtCore.Qt.ToolTipRole:
-				t = timers[-1-index.row()]
 				if t:
 					return t.description()
-			if role != QtCore.Qt.DisplayRole:
-				return None
-			t = timers[-1-index.row()]
-			if index.column() == 0:
-				return t.name
-			elif index.column() == 1:
-				d = int((t.duration().total_seconds() + 60) / 60) # round up 
-				if t.active():
-					prefix = "+"
-				else:
-					prefix = " "
-				return prefix + "{:d}:{:02d}".format(int(d / 60), d % 60)
+			if role == QtCore.Qt.BackgroundRole:
+				if not t:
+					return QtGui.QBrush(QtCore.Qt.red)
+			if role == QtCore.Qt.DisplayRole:
+				if index.column() == 1 and t and t.active():
+					return self.duration_str(t)
+				return self.rows[index.row()][index.column()]
 			return None
 		def headerData(self, col, orientation, role):
 			if orientation == QtCore.Qt.Horizontal and role == QtCore.Qt.DisplayRole:
 				return self.header[col]
 			return None
 		def getTimer(self,row):
-			return timers[-1-row]
+			return self.rows[row][2]
+		def on_model_reset(self):
+			self.create_rows()
+
 
 	app = QtGui.QApplication(sys.argv)
 	app.setApplicationName("TimeTracker")
@@ -625,8 +658,9 @@ def gui():
 	# TODO: only run the timer when there is an active task
 	def updateTimer():
 		if timers[-1].active():
-			index = table_model.createIndex(0, 1, None)
-			table_model.dataChanged.emit(index, index)
+			index0 = table_model.createIndex(0, 1, None)
+			index1 = table_model.createIndex(1, 1, None)
+			table_model.dataChanged.emit(index0, index1)
 	timer = QtCore.QTimer()
 	timer.setInterval(30000) # 30 seconds
 	timer.timeout.connect(updateTimer)
@@ -640,8 +674,9 @@ def gui():
 		now = datetime.datetime.now().replace(microsecond=0)
 		(options, optargs) = parser.parse_args(cmd)
 		options.gui = False;
+		table_model.beginResetModel()
 		main()
-		table_model.reset()
+		table_model.endResetModel()
 		sb = table_view.verticalScrollBar()
 		if sb:
 			sb.setSliderPosition(0)
@@ -663,8 +698,9 @@ def gui():
 		global options
 		fname = os.path.expanduser(options.filename)
 		if os.path.exists(fname):
+			table_model.beginResetModel()
 			load(fname)
-			table_model.reset()
+			table_model.endResetModel()
 			statusbar.showMessage("Reloaded " + fname)
 		else:
 			statusbar.showMessage("Could not reload " + fname)
@@ -704,6 +740,7 @@ def gui():
 		run_command(entry.displayText().split())
 	table_view.selectionModel().selectionChanged.connect(on_item_changed)
 	table_view.doubleClicked.connect(on_item_double)
+	table_model.modelReset.connect(table_model.on_model_reset)
 	entry.returnPressed.connect(on_return_pressed)
 
 	win.show()
