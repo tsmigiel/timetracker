@@ -383,14 +383,14 @@ def add_duration(timer, total):
 		else:
 			total[1][t] = d
 
-def duration_str(d):
+def duration_str(d, prefix = ' '):
 	minutes, seconds = divmod(d.total_seconds(), 60)
 	hours, minutes = divmod(minutes, 60)
 	if hours != 0 or minutes != 0:
-		return '{:>3d}:{:>02d}'.format(int(hours), int(minutes))
+		return prefix + '{:>2d}:{:>02d}'.format(int(hours), int(minutes))
 	if seconds != 0:
-		return '   .{:>02d}'.format(int(seconds))
-	return '      '
+		return prefix + '  .{:>02d}'.format(int(seconds))
+	return prefix + '     '
 
 def print_durations(total):
 	t = datetime.timedelta(0)
@@ -558,15 +558,34 @@ def gui():
 	class TimerTableModel(QtCore.QAbstractTableModel):
 		def __init__(self, parent, header, *args):
 			QtCore.QAbstractTableModel.__init__(self, parent, *args)
-			self.create_rows()
+			self.combined = False
 			self.header = header
-		def duration_str(self, timer):
-			d = int((timer.duration().total_seconds() + 60) / 60) # round up 
-			if timer.active():
+			self.create_rows()
+
+		def duration_str(self, timers, none_on_active):
+			duration = datetime.timedelta(0)
+			active = False
+			for t in timers:
+				if t.active():
+					if none_on_active:
+						return None
+					active = True
+				duration = duration + t.duration()
+			if active:
 				prefix = "+"
 			else:
 				prefix = " "
-			return prefix + "{:d}:{:02d}".format(int(d / 60), d % 60)
+			return duration_str(duration, prefix)
+
+		def description(self, timers):
+			desc = timers[0].name
+			for t in reversed(timers):
+				if t.active():
+					desc = desc + "  {:%H:%M}-now".format(t.start)
+				else:
+					desc = desc + "  {:%H:%M}-{:%H:%M}".format(t.start, t.end)
+			return desc
+
 		def create_rows(self):
 			self.rows = []
 			l = len(timers)
@@ -579,7 +598,14 @@ def gui():
 			else:
 				date_end = "{:%H:%M}+".format(t.start)
 			self.rows.append(None)
-			self.rows.append((t.name, self.duration_str(t), t))
+			combined_timers = {}
+			combined_rows = {}
+			if not self.combined:
+				self.rows.append((t.name, self.duration_str([t], True), [t]))
+			else:
+				combined_timers[t.name] = [t]
+				combined_rows[t.name] = len(self.rows)
+				self.rows.append(None)
 			for i in range(2, l):
 				pt = timers[-i+1]
 				t = timers[-i]
@@ -591,34 +617,63 @@ def gui():
 					date_row = len(self.rows)
 					date_end = "{:%H:%M}".format(t.end)
 					self.rows.append(None)
-				self.rows.append((t.name, self.duration_str(t), t))
+					if self.combined:
+						for name, r in combined_rows.items():
+							tt = combined_timers[name]
+							n = " " + name
+							if len(tt) > 1:
+								n = "+" + name
+							self.rows[r] = (n, self.duration_str(tt, True), tt)
+					combined_timers = {}
+					combined_rows = {}
+				if not self.combined:
+					self.rows.append((t.name, self.duration_str([t], True), [t]))
+				elif t.name in combined_timers:
+					combined_timers[t.name].append(t)
+				else:
+					combined_timers[t.name] = [t]
+					combined_rows[t.name] = len(self.rows)
+					self.rows.append(None)
 			if date_row:
 				self.rows[date_row] = ("{:%Y-%m-%d %H:%M}-{:s}".format(timers[-l].start, date_end), "", None)
+			if self.combined:
+				for name, r in combined_rows.items():
+					tt = combined_timers[name]
+					n = " " + name
+					if len(tt) > 1:
+						n = "+" + name
+					self.rows[r] = (n, self.duration_str(tt, True), tt)
+
 		def rowCount(self, parent):
 			return len(self.rows)
+
 		def columnCount(self, parent):
 			return 2
+
 		def data(self, index, role):
 			if not index.isValid():
 				return None
 			t = self.rows[index.row()][2]
 			if role == QtCore.Qt.ToolTipRole:
 				if t:
-					return t.description()
+					return self.description(t)
 			if role == QtCore.Qt.BackgroundRole:
 				if not t:
 					return QtGui.QBrush(QtCore.Qt.red)
 			if role == QtCore.Qt.DisplayRole:
-				if index.column() == 1 and t and t.active():
-					return self.duration_str(t)
+				if index.column() == 1 and not self.rows[index.row()][index.column()] and t:
+					return self.duration_str(t, False)
 				return self.rows[index.row()][index.column()]
 			return None
+
 		def headerData(self, col, orientation, role):
 			if orientation == QtCore.Qt.Horizontal and role == QtCore.Qt.DisplayRole:
 				return self.header[col]
 			return None
+
 		def getTimer(self,row):
 			return self.rows[row][2]
+
 		def on_model_reset(self):
 			self.create_rows()
 
@@ -650,6 +705,7 @@ def gui():
 	table_view.setFont(QtGui.QFont(font_name, font_size))
 	table_view.setSelectionBehavior(QtGui.QAbstractItemView.SelectRows)
 	table_view.setSelectionMode(QtGui.QAbstractItemView.SingleSelection)
+	table_view.verticalHeader().setVisible(False)
 	table_view.horizontalHeader().setResizeMode(0, QtGui.QHeaderView.Stretch)
 	table_view.resizeColumnsToContents()
 	layout.addWidget(table_view)
@@ -725,17 +781,21 @@ def gui():
 	# Connect table view and line box actions.
 	def on_item_changed(selected, deselected):
 		if selected[0]:
-			t = table_model.getTimer(selected[0].top())
-			if t:
-				entry.setText(t.name)
-				statusbar.showMessage(t.description())
+			tt = table_model.getTimer(selected[0].top())
+			if tt:
+				entry.setText(tt[0].name)
+				statusbar.showMessage(table_model.description(tt))
 		else:
 			entry.setText("")
 	def on_item_double(selected):
-		t = table_model.getTimer(selected.row())
-		if t:
-			entry.setText(t.name)
+		tt = table_model.getTimer(selected.row())
+		if tt:
+			entry.setText(tt[0].name)
 			do_run()
+		else:
+			table_model.beginResetModel()
+			table_model.combined = not table_model.combined
+			table_model.endResetModel()
 	def on_return_pressed():
 		run_command(entry.displayText().split())
 	table_view.selectionModel().selectionChanged.connect(on_item_changed)
